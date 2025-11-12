@@ -302,8 +302,8 @@
         const keyboardHandler = handleKeyboard.bind(this);
         let isCropping = false;
         let objectToCrop;
-
-        const API_URL = 'https://image-background-remover-7swv.onrender.com';
+        
+        const API_URL = 'https://image-background-remover-7swv.onrender.com/api/remove-background';
 
         function debounce(func, wait) {
             let timeout;
@@ -809,21 +809,42 @@
 
 
         async function handleFile(file) {
-            if (!file) return;
-            showLoading();
-            uploadContainer.classList.add('hidden');
-            resultContainer.classList.remove('hidden');
-            initCanvas();
+    if (!file) return;
+    console.log("Starting upload for file:", file.name, file.size);
+    showLoading();
+    uploadContainer.classList.add('hidden');
+    resultContainer.classList.remove('hidden');
+    initCanvas();
 
-            const formData = new FormData();
-            formData.append('file', file);
+    // reset any previous errors
+    errorMessage.classList.add('hidden');
+    errorText.textContent = '';
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    // Use XHR so we can show upload progress and handle non-JSON responses gracefully
+    const xhr = new XMLHttpRequest();
+    const TIMEOUT_MS = 60000; // 60s timeout - adjust if needed
+
+    xhr.open('POST', API_URL, true);
+    xhr.timeout = TIMEOUT_MS;
+    // Note: DO NOT set Content-Type header for FormData; browser will set multipart boundary.
+
+    // progress UI (optional - you can hook into loadingState or add a progress bar)
+    xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+            const pct = Math.round((e.loaded / e.total) * 100);
+            console.log(`Upload progress: ${pct}%`);
+            // you can also show pct on UI if you add a progress element
+        }
+    };
+
+    xhr.onload = async () => {
+        console.log("XHR finished. status:", xhr.status);
+        if (xhr.status === 200) {
             try {
-                const response = await fetch(API_URL, { method: 'POST', body: formData });
-                if (!response.ok) {
-                    const errorData = await response.json().catch(() => null);
-                    throw new Error(errorData?.error || `An unexpected error occurred.`);
-                }
-                const blob = await response.blob();
+                const blob = xhr.response || new Blob([xhr.responseText], { type: 'image/png' });
                 const reader = new FileReader();
                 reader.onload = (e) => {
                     loadingState.classList.add('hidden');
@@ -831,15 +852,51 @@
                     addImageToCanvas(e.target.result);
                 };
                 reader.readAsDataURL(blob);
-
-            } catch (error) {
-                console.error('Error:', error);
-                showError(error.message);
+            } catch (err) {
+                console.error('Error reading response blob:', err);
+                showError('Failed to parse image response from server.');
             }
+        } else {
+            // try to parse JSON error (server returns {"error": "..."}), otherwise show generic
+            let msg = `Server returned ${xhr.status}`;
+            try {
+                const text = xhr.responseText;
+                const json = text ? JSON.parse(text) : null;
+                if (json?.error) msg = json.error;
+            } catch (e) {
+                // non-json response
+                msg = `Server returned status ${xhr.status}`;
+            }
+            console.warn('Upload error:', msg);
+            showError(msg);
         }
+    };
+
+    xhr.onerror = () => {
+        console.error('Network or CORS error during upload');
+        showError('Network error or CORS issue during upload — check browser console and server CORS.');
+    };
+
+    xhr.ontimeout = () => {
+        console.error('Upload timed out');
+        showError('Upload timed out. Try a smaller file or increase timeout.');
+    };
+
+    // Expect binary image response
+    xhr.responseType = 'blob';
+
+    try {
+        xhr.send(formData);
+    } catch (err) {
+        console.error('XHR send failed', err);
+        showError('Failed to send request: ' + err.message);
+    }
+}
+
     </script>
 </body>
 </html>
+
 
 
 
